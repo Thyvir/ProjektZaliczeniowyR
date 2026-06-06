@@ -1,0 +1,167 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+```
+
+## Poziom 1
+
+Przygotowanie i walidacja danych pozwala na ujednolicenie struktury danych z Kaggle oraz automatyczne wykrycie problemów z jakością szeregów czasowych.
+
+### 1. Wczytywanie danych: `load_sales_data()`
+
+Funkcja automatycznie wczytuje i spaja trzy kluczowe zbiory danych z Kaggle (`train.csv`, `stores.csv`, `holidays_events.csv`). Łączenie odbywa się za pomocą relacji `left_join`, dzięki czemu dane sprzedażowe zostają wzbogacone o dane sklepów (miasto, stan, typ) oraz informacje o dniach świątecznych.
+
+**Użycie:**
+
+```{r}
+library(salesanalystR)
+
+# Wczytanie danych z lokalnego folderu "dane" (zignorowanego w .gitignore)
+dane_base <- load_sales_data("dane")
+
+# Podgląd struktury tabeli
+head(dane_base)
+```
+
+### 2. Walidacja jakości danych: `validate_sales_ts()`
+
+Funkcja przeprowadza automatyczny audyt techniczny i biznesowy wczytanego zbioru danych. Zwraca szczegółowy raport w postaci listy oraz wyświetla ostrzeżenia (warnings) w konsoli, jeśli wykryje nieprawidłowości.
+
+Audyt obejmuje:
+
+* **Braki danych (NA):** Zlicza puste wartości w każdej kolumnie.
+* **Duplikaty:** Sprawdza, czy dla tej samej daty, sklepu i kategorii produktu (`family`) nie pojawiają się podwójne wpisy.
+* **Poprawność formatu dat:** Weryfikuje, czy kolumna z czasem została poprawnie rozpoznana jako obiekt klasy `Date`.
+* **Zakres wartości:** Wykrywa błędne, ujemne wartości sprzedaży.
+* **Częstotliwość szeregu:** Analizuje ciągłość osi czasu i wylicza, czy w danych nie brakuje całych dni.
+
+**Użycie:**
+
+```{r}
+# Uruchomienie audytu danych
+raport_jakosci <- validate_sales_ts(dane_base)
+
+# Wyświetlenie pełnego raportu w konsoli
+print(raport_jakosci)
+```
+
+### 3. Czyszczenie danych: `clean_sales_ts()`
+
+Funkcja przetwarza dane sprzedażowe przygotowując je do analizy i modelowania. Usuwa braki danych, obsługuje duplikaty, umożliwia sortowanie oraz opcjonalną agregację czasową (np. z dziennej na tygodniową).
+
+***Użycie:***
+
+```{r}
+# Czyszczenie danych z domyślnym wypełnianiem braków zerami
+dane_czyste <- clean_sales_ts(
+  dane_base, 
+  fill_na_method = "zero", 
+  time_aggregation = NULL,
+  sort_data = TRUE
+)
+```
+
+### 4. Obliczanie metryk biznesowych: `compute_sales_metrics()`
+
+Funkcja wylicza kluczowe wskaźniki (m.in. sprzedaż całkowitą, przeciętną sprzedaż, zmienność, udział promocji, średnią kroczącą) oraz szacuje średni odstęp pomiędzy szczytami sprzedaży dla każdego produktu i sklepu. Zwraca listę z wzbogaconym szeregiem czasowym i tabelą z podsumowaniem wskaźników.
+
+**Użycie:**
+
+```{r}
+# Wyliczenie metryk ze średnią kroczącą z 7 dni
+wyniki_metryk <- compute_sales_metrics(
+  dane_czyste, 
+  window_size = 7, 
+  peak_threshold_percentile = 0.95
+)
+
+# Podgląd zagregowanych wskaźników
+head(wyniki_metryk$metrics_summary)
+```
+
+## Poziom 2
+
+Po oczyszczeniu danych i wyliczeniu podstawowych metryk, ten etap pozwala na zgłębienie trendów poprzez wizualizację, analizę konkretnych segmentów rynku oraz generowanie gotowych wniosków biznesowych dla zarządu.
+
+### 5. Wizualizacja trendów sprzedaży: `plot_sales_trends()`
+
+Funkcja tworzy czytelne wykresy liniowe przy użyciu pakietu `ggplot2`. Automatycznie agreguje dane, a także pozwala na opcjonalne rozbicie wykresu według dowolnej zmiennej kategorycznej (np. kategorii produktu lub numeru sklepu).
+
+**Użycie:**
+
+```{r}
+# Ogólny trend dla całego zbioru danych
+wykres_ogolny <- plot_sales_trends(dane_czyste)
+print(wykres_ogolny)
+
+# Trend w rozbiciu na kategorie produktów (family)
+wykres_kategorie <- plot_sales_trends(dane_czyste, group_var = "family")
+print(wykres_kategorie)
+```
+
+### 6. Analiza wybranego segmentu: `sales_ts_logic()`
+
+Funkcja wyższego rzędu (tzw. wrapper), która działa jak kompletny potok analityczny dla wycinka danych. Pozwala odfiltrować dane po metadanych sklepów (miasto, stan, typ) oraz datach, a następnie automatycznie przelicza dla nich metryki biznesowe i generuje dedykowany wykres.
+
+**Użycie:**
+
+```{r}
+# Pełna analiza dla wybranych typów sklepów w mieście Quito od 2016 roku
+analiza_quito <- sales_ts_logic(
+  df = dane_czyste,
+  cities = "Quito",
+  types = c("A", "D"),
+  start_date = "2016-01-01",
+  group_by_var = "family"
+)
+
+# Podgląd wygenerowanego wykresu i metryk
+print(analiza_quito$plot)
+head(analiza_quito$metrics$metrics_summary)
+```
+
+## Poziom 3
+
+### 7. Podsumowanie dla zarządu: `create_management_summary()`
+
+Funkcja wspierająca podejmowanie decyzji. Identyfikuje kluczowe wskaźniki efektywności (KPI), takie jak najlepszy/najgorszy punkt sprzedaży, najszybciej rosnąca kategoria czy największy spadek procentowy, opierając się na porównaniu wybranego, ostatniego okresu z poprzedzającym.
+
+**Użycie:**
+
+```{r}
+# Generowanie raportu biznesowego (porównanie ostatnich 30 dni do poprzednich 30 dni)
+raport_zarzad <- create_management_summary(dane_czyste, period_days = 30)
+
+# Wyciągnięcie konkretnych wniosków
+print(raport_zarzad$best_store)
+print(raport_zarzad$fastest_growing_category)
+```
+
+Ostatni etap to wykorzystanie historycznych danych sprzedażowych do oszacowania przyszłego popytu.
+
+### 8. Prognozowanie: `create_prognosis()`
+
+Funkcja agreguje dane do poziomu całkowitej sprzedaży dziennej i trenuje dwa niezależne modele szeregów czasowych: klasyczny ARIMA (z automatycznym doborem optymalnych parametrów) oraz nowoczesny algorytm Prophet (od Mety). Zwraca przejrzystą tabelę porównującą obie prognozy.
+
+**Użycie:**
+
+```{r}
+library(forecast)
+library(prophet)
+
+# Wygenerowanie prognozy na najbliższe 14 dni
+wyniki_prognoz <- create_prognosis(dane_czyste, h = 14)
+
+# Porównanie wyników ARIMA i Prophet
+print(wyniki_prognoz$comparison_df)
+```
