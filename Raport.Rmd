@@ -1,0 +1,175 @@
+---
+title: "Raport"
+author: "Karolina Sławińska, Małgorzata Filipiak"
+date: "2026-06-05"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+#Ładujemy potrzebne pakiety plus ukrycie kodu w ostatecznym raporcie
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+#Załadowanie pakietu
+devtools::load_all() # do testów lokalnych
+
+#Wczytanie danych i użycie funkcji czyszczących
+dane <- load_sales_data("dane")
+dane_clean <- clean_sales_ts(dane)
+```
+
+## Wprowadzenie i Opis Danych:
+
+Niniejszy raport powstał w celu przekształcenia surowych danych sprzedażowych w strategiczne wnioski biznesowe. 
+Analiza opiera się na dużym, publicznie dostępnym zbiorze danych pobranym z platformy Kaggle, dotyczącym ekwadorskiej sieci supermarketów Corporación Favorita.
+
+**Charakterystyka analizowanego zbioru danych:**
+
+* **Zakres czasowy:** Dane obejmują codzienne transakcje rejestrowane w latach 2013–2017.
+
+* **Kluczowe zmienne:** Zbiór zawiera informacje o dacie transakcji (`date`), numerze identyfikacyjnym placówki (`store_nbr`), kategorii asortymentowej (`family` – np. napoje, artykuły spożywcze, kosmetyki), wolumenie sprzedaży (`sales`) oraz liczbie produktów danego typu objętych w danym dniu promocją (`onpromotion`).
+
+* **Cel analizy:** Wykorzystanie dedykowanego pakietu `salesanalystR` do identyfikacji długoterminowych trendów, oceny realnego wpływu rabatów na decyzje zakupowe klientów, stworzenia rankingu najbardziej efektywnych sklepów oraz przetestowania zaawansowanych modeli prognostycznych (ARIMA i Prophet) w celu przewidzenia popytu na kolejne 30 dni.
+
+## 1. Trendy sprzedażowe produktów (POZIOM 2)
+
+Analiza historycznych szeregów czasowych pozwala na identyfikację głównych wzorców zachowań konsumentów. 
+
+Poniższy wykres prezentuje ogólny trend sprzedaży produktów w analizowanym okresie. Widoczne fluktuacje mogą wynikać z naturalnej sezonowości tygodniowej lub rocznej.
+
+```{r trendy-sprzedazowe, echo=FALSE, fig.width=10, fig.height=5}
+# Wyliczenie podstawowych metryk biznesowych 
+metryki_sprzedazy <- compute_sales_metrics(dane_clean)
+
+# Wygenerowanie wykresu trendów (wyciągamy tylko tabelę 'enriched_ts')
+plot_sales_trends(metryki_sprzedazy$enriched_ts)
+```
+
+**WNIOSKI ANALITYCZNE DOTYCZĄCE TRENDÓW SPRZEDAŻOWYCH:**
+
+Analizując szereg czasowy z lat 2013–2017 dotyczący sprzedaży widoczna jest złożona struktura, na którą składają się cztery główne czynniki:
+
+-   **Długoterminowy trend wzrostowy:** Dzienna sprzedaż systematycznie rośnie. Na początku 2013 roku dzienna sprzedaż oscylowała w granicach 400–500 tysięcy, podczas gdy w 2017 roku standardowy poziom przekraczał już 1 milion. Sugeruje to organiczny rozwój sieci lub rosnący udział w rynku.
+-   **Wysoka sezonowość roczna (Piki Q4):** Zauważalna jest silna koncentracja popytu pod koniec każdego roku kalendarzowego. Sprzedaż w okresie przedświątecznym gwałtownie rośnie, osiągając wartości dwukrotnie, a nawet trzykrotnie wyższe niż średnia roczna (piki rzędu 2,5 mln – 3 mln).
+-   **Regularne przestoje:** Ostre, pionowe linie spadające do wartości rzędu 0 mogą być dniami ustawowo wolnymi od handlu (najprawdopodobniej okres świąteczny i 1 stycznia). Ważne jest uwzględnienie w modelach całkowitego zamknięcia sieci, bo w przeciwnym razie zaburzy to przewidywania dla całego miesiaca.
+
+**Rekomendacje dla biznesu:** Zarządzanie łańcuchem dostaw musi zostać zoptymalizowane pod kątem końcówki roku - sieć musi być gotowa na obsłużenie ponad dwukrotnie większego ruchu.
+
+## 2. Skuteczność promocji (POZIOM 2)
+```{r skutecznosc-promocji, echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(knitr)
+
+#Agregacja danych
+tabela_promocji <- metryki_sprzedazy$metrics_summary %>%
+  group_by(family) %>%
+  summarise(
+    Calkowita_Sprzedaz = sum(total_sales, na.rm = TRUE),
+    Sredni_Udzial_Promocji_Proc = mean(promo_share_pct, na.rm = TRUE)
+  ) %>%
+  #TOP 10
+  arrange(desc(Calkowita_Sprzedaz)) %>%
+  head(10)
+
+#Tabela
+kable(tabela_promocji, 
+      col.names = c("Kategoria", "Całkowita Sprzedaż", "Średni Udział Promocji (%)"),
+      caption = "Top 10 kategorii o najwyższej sprzedaży oraz ich wsparcie promocyjne",
+      digits = 2, 
+      format.args = list(big.mark = " "))
+```
+**WNIOSKI ANALITYCZNE DOTYCZĄCE SKUTECZNOŚCI PROMOCJI:**
+
+Analiza wskaźników z tabeli wyraźnie wskazuje na korelację między intensywnością działań promocyjnych a generowanym wolumenem sprzedaży:
+
+-    **Liderzy napędzani promocjami:** Kategorie generujące największy obrót, takie jak GROCERY I (Artykuły spożywcze) oraz BEVERAGES (Napoje), posiadają wysoki, około 60-65% udział sprzedaży w dniach z akcjami promocyjnymi. Potwierdza to, że klienci chętniej sięgają po te towary przy obniżonych cenach, a promocje są głównym motorem napędowym tych działów.
+
+-   **Marnowany potencjał innych kategorii:** W danych widoczne są działy, dla których udział promocyjny wynosi 0% (np. LADIESWEAR czy HARDWARE). Wyniki sprzedażowe tych sekcji są nieporównywalnie niższe.
+
+**Rekomendacje dla biznesu:** Warto rozważyć uruchomienie eksperymentalnych kampanii promocyjnych w kategoriach o zerowym udziale akcji specjalnych. Pozwoli to sprawdzić elastyczność cenową tych produktów i potencjalnie odblokować w nich nowe źródła przychodów.
+
+## 3. Prognozowanie sprzedaży (POZIOM 3) 
+
+Kluczowym elementem analizy szeregów czasowych jest predykcja przyszłego popytu. Wykorzystanie modeli prognostycznych pozwala firmie na optymalizację łańcucha dostaw, zmniejszenie kosztów magazynowania oraz lepsze przygotowanie się na nadchodzące piki sprzedażowe.
+
+```{r prognozowanie, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+#Pobranie listy z prognozami
+tabela_prognoz <- create_prognosis(dane_clean)
+
+#Przekształcenie comparison_df do wykresu
+prognoza_long <- tabela_prognoz$comparison_df %>%
+  pivot_longer(
+    cols = c(arima_forecast, prophet_forecast),
+    names_to = "Model",
+    values_to = "Wartosc_Prognozy"
+  ) %>%
+  mutate(Model = ifelse(Model == "arima_forecast", "Model ARIMA", "Model Prophet"))
+
+# Rysowanie wykresu
+ggplot(prognoza_long, aes(x = date, y = Wartosc_Prognozy, color = Model)) +
+  geom_line(linewidth = 1) +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::comma_format(big.mark = " ")) +
+  labs(
+    title = "Prognoza sprzedaży na kolejne 30 dni",
+    subtitle = "Porównanie modeli ARIMA oraz Prophet",
+    x = "Data",
+    y = "Przewidywana sprzedaż",
+    color = "Zastosowany Model"
+  ) +
+  theme(legend.position = "bottom")
+```
+**Wnioski analityczne i ocena modeli:**
+
+Analiza wygenerowanej prognozy na kolejne 30 dni (od połowy sierpnia do połowy września) ujawnia różnice w sposobie przewidywania popytu przez zastosowane algorytmy:
+
+* **Spłaszczenie trendu w modelu ARIMA:** Tradycyjny model ARIMA (czerwona linia) wygenerował bardzo zachowawczą prognozę. Po początkowych, niewielkich wahaniach na poziomie 810–850 tysięcy, linia trendu ulega szybkiej stabilizacji i niemal całkowicie wypłaszcza się w okolicach 880 tysięcy. Oznacza to, że algorytm uchwycił ogólny średni wolumen, ale nie poradził sobie z mapowaniem lokalnej zmienności.
+* **Wysoka czułość modelu Prophet:** Algorytm Prophet (niebieska linia) doskonale zidentyfikował i odwzorował silną, powtarzalną sezonowość tygodniową sieci. Wskazuje on na regularne, głębokie spadki sprzedaży (w okolicach 700–750 tysięcy) przeplatane ostrymi, powtarzającymi się pikami, w których sprzedaż gwałtownie przekracza próg 1 miliona sztuk (osiągając w szczytach nawet 1,1 mln).
+
+**Rekomendacja dla łańcucha dostaw:** Do celów bieżącego zarządzania zaopatrzeniem i planowania grafików pracowniczych należy bezwzględnie wykorzystywać prognozy z modelu Prophet. Zastosowanie spłaszczonych wyliczeń z modelu ARIMA (ok. 880 tys. dziennie) doprowadziłoby do braków towarowych (out-of-stock) w dni szczytowe oraz zalegania produktów na magazynie w dniach o niższym popycie.
+
+## 4. Porównanie sklepów i kategorii (POZIOM 3)
+
+W celu optymalizacji działań handlowych, niezbędne jest zrozumienie dysproporcji sprzedażowych pomiędzy poszczególnymi placówkami oraz kategoriami. Poniższa analiza wykorzystuje logikę biznesową pakietu do zestawienia wyników:
+
+```{r porownanie-sklepow, echo=FALSE, message=FALSE, warning=FALSE}
+library(knitr)
+library(dplyr)
+
+# Wywołanie funkcji biznesowej
+wynik_logiki <- sales_ts_logic(dane_clean)
+
+tabela_danych <- if(is.data.frame(wynik_logiki)) wynik_logiki else wynik_logiki[[1]]
+
+#ranking Top 10 najlepszych sklepów:
+ranking_sklepow <- tabela_danych %>%
+  group_by(store_nbr) %>%
+  summarise(
+    Calkowita_Sprzedaz = sum(sales, na.rm = TRUE),
+    Calkowite_Promocje = sum(onpromotion, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Calkowita_Sprzedaz)) %>%
+  head(10)
+
+#Tabela
+kable(ranking_sklepow, 
+      col.names = c("Numer Sklepu", "Całkowita Sprzedaż", "Ilość Akcji Promocyjnych"),
+      caption = "Ranking Top 10 Sklepów generujących największy obrót",
+      digits = 0, 
+      format.args = list(big.mark = " "))
+```
+
+**WNIOSKI ANALITYCZNE:**
+
+Analiza zestawienia TOP 10 najlepszych placówek sieci ujawnia kluczowe mechanizmy wpływające na obroty:
+
+* **Dominacja lidera:** Sklep nr 44 bezapelacyjnie wygrywa ranking (ponad 63 mln obrotu), generując ponad dwukrotnie większą sprzedaż niż placówka zamykająca pierwszą dziesiątkę. 
+* **Siła promocji:** Najlepsze wyniki są ściśle powiązane z agresywną polityką rabatową. Trzy najlepsze sklepy przeprowadziły po ponad 190 tysięcy akcji promocyjnych w badanym okresie.
+* **Wyjątek od reguły (Sklep nr 3):** Sklep nr 3 osiąga świetne wyniki (51 mln) przy odczuwalnie mniejszej liczbie promocji, co świadczy o wybitnej sprzedaży organicznej (bez rabatów) i lojalnej bazie klientów.
+
+**Rekomendacje biznesowe:** Dział optymalizacji sprzedaży powinien zbadać praktyki Sklepu nr 3 i wdrożyć je w placówkach takich jak Sklep nr 46, które obecnie generują słabsze wyniki finansowe mimo ogromnych nakładów na promocje.
